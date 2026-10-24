@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kavach</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Zm-1 14-4-4 1.4-1.4L11 13.2l4.6-4.6L17 10l-6 6Z"/></svg>
+      </div>
+      <div>
+        <h1>Kavach</h1>
+        <p class="sub">Local privacy shield for AI chats</p>
+      </div>
+    </header>
+
+    <section class="status" id="status">
+      <span class="dot"></span><span id="status-text">Checking engine…</span>
+    </section>
+    <ul class="models" id="models"></ul>
+
+    <section class="toggles">
+      <label class="toggle">
+        <span><b>Protect pastes &amp; uploads</b><small>Scan before anything reaches the chatbot</small></span>
+        <input type="checkbox" id="enabled" />
+      </label>
+      <label class="toggle">
+        <span><b>Deep scan</b><small>Also use Qwen3 for addresses, relatives, medical info (slower)</small></span>
+        <input type="checkbox" id="deep" />
+      </label>
+      <label class="toggle">
+        <span><b>Show real values in replies</b><small>Off shows exactly what the chatbot saw</small></span>
+        <input type="checkbox" id="restore" />
+      </label>
+    </section>
+
+    <details class="panel" id="terms-panel">
+      <summary><b>Always hide</b><small id="terms-count"></small></summary>
+      <p class="help">Words Kavach should always hide, one per line: your name, company, project code names…</p>
+      <textarea id="terms" rows="4" spellcheck="false" placeholder="Rahul Sharma&#10;Project Falcon"></textarea>
+      <button id="save-terms" type="button" class="small">Save</button>
+    </details>
+
+    <section class="stats">
+      <div class="big"><span id="total">0</span> items protected</div>
+      <div class="chips" id="by-type"></div>
+    </section>
+
+    <footer>
+      <button id="clear" type="button">Forget all placeholders</button>
+    </footer>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
