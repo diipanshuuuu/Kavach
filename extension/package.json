@@ -1,0 +1,21 @@
+{
+  "name": "kavach-extension",
+  "description": "Kavach: masks Indian personal data before it reaches cloud chatbots, using local open-weight AI.",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "postinstall": "wxt prepare"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "wxt": "^0.21.0"
+  }
+}
