@@ -40,14 +40,19 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''):
 
 const SHIELD = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 2 4 5v6c0 5 3.4 9.7 8 11 4.6-1.3 8-6 8-11V5l-8-3Zm-1 14-4-4 1.4-1.4L11 13.2l4.6-4.6L17 10l-6 6Z"/></svg>`;
 
+const SHIELD_SM = SHIELD.replace(/width="22" height="22"/, 'width="16" height="16"');
+
 interface Shell {
   overlay: HTMLElement;
   body: HTMLElement;
   footer: HTMLElement;
   close: () => void;
+  /** What the ✕ button does (defaults to closing). */
+  onDismiss: (fn: () => void) => void;
 }
 
-function shell(title: string, subtitle: string): Shell {
+/** Card frame: gradient header with title, trust badge and ✕, then body and footer. */
+function shell(title: string, subtitle: string, badge: 'local' | 'offline' | null = 'local'): Shell {
   const r = ensureRoot();
   const overlay = el('div', 'overlay');
   const card = el('div', 'card');
@@ -59,19 +64,47 @@ function shell(title: string, subtitle: string): Shell {
   const titles = el('div', 'titles');
   titles.append(el('div', 'title', title), el('div', 'subtitle', subtitle));
   head.append(logo, titles);
+  if (badge) {
+    const b = el('span', `badge${badge === 'offline' ? ' offline' : ''}`);
+    b.append(el('span', 'dot'), document.createTextNode(badge === 'offline' ? 'In-browser check' : 'On this device'));
+    b.title = badge === 'offline' ? 'Local engine offline: checked with in-browser rules' : 'Checked by the Kavach engine on this laptop. Nothing was sent anywhere.';
+    head.append(b);
+  }
+  const close = () => overlay.remove();
+  let dismiss = close;
+  const x = el('button', 'x', '×');
+  x.type = 'button';
+  x.setAttribute('aria-label', 'Close');
+  x.addEventListener('click', () => dismiss());
+  head.append(x);
   const body = el('div', 'body');
   const footer = el('div', 'footer');
   card.append(head, body, footer);
   overlay.append(card);
   r.append(overlay);
-  return { overlay, body, footer, close: () => overlay.remove() };
+  return { overlay, body, footer, close, onDismiss: (fn) => (dismiss = fn) };
 }
 
 function button(label: string, kind: 'primary' | 'ghost' | 'danger', onClick: () => void): HTMLButtonElement {
-  const b = el('button', `btn ${kind}`, label);
+  const b = el('button', `btn ${kind}`);
   b.type = 'button';
+  setLabel(b, label);
   b.addEventListener('click', onClick);
   return b;
+}
+
+/** Set a button's text; primary buttons get the shield icon. */
+function setLabel(b: HTMLButtonElement, label: string): void {
+  const icon = el('span');
+  icon.style.display = 'grid';
+  if (b.classList.contains('primary')) icon.innerHTML = SHIELD_SM;
+  b.replaceChildren(...(icon.innerHTML ? [icon] : []), document.createTextNode(label));
+}
+
+function keyHints(enterLabel: string): HTMLElement {
+  const k = el('span', 'keys');
+  k.append(el('kbd', '', '↵'), document.createTextNode(` ${enterLabel}  `), el('kbd', '', 'Esc'), document.createTextNode(' cancel'));
+  return k;
 }
 
 function legend(types: string[]): HTMLElement {
@@ -153,9 +186,11 @@ export function reviewText(text: string, entities: Entity[], opts: TextOpts): Pr
     const s = shell(
       n ? `Kavach found ${n} sensitive item${n === 1 ? '' : 's'}` : 'Kavach found nothing automatically',
       'Click a highlight to keep it visible. Click any other word to hide it.',
+      opts.mode === 'browser' ? 'offline' : 'local',
     );
     const on = entities.map(() => true);
     let manual: [number, number][] = []; // spans the user chose to hide
+    let view: 'review' | 'sent' = 'review';
 
     const inManual = (a: number, b: number) => manual.findIndex(([s0, e0]) => a < e0 && s0 < b);
     const overlapsAuto = (a: number, b: number) => entities.some((e, i) => on[i] && a < e.end && e.start < b);
@@ -163,8 +198,27 @@ export function reviewText(text: string, entities: Entity[], opts: TextOpts): Pr
     s.body.append(...modeNotes(opts.mode));
     const legendSlot = el('div');
     s.body.append(legendSlot);
+
+    // Two views of the same text: what you'll hide, and exactly what the chatbot receives.
+    const tabs = el('div', 'tabs');
+    const tabReview = el('button', 'tab on', 'Review');
+    const tabSent = el('button', 'tab', 'What the chatbot gets');
+    for (const [t, v] of [[tabReview, 'review'], [tabSent, 'sent']] as const) {
+      t.type = 'button';
+      t.addEventListener('click', () => {
+        view = v;
+        tabReview.classList.toggle('on', v === 'review');
+        tabSent.classList.toggle('on', v === 'sent');
+        draw();
+      });
+    }
+    tabs.append(tabReview, tabSent);
+    s.body.append(tabs);
     const preview = el('div', 'preview');
     s.body.append(preview);
+    const sentNote = el('p', 'note', 'Exactly this goes to the chatbot. The real values stay on this device.');
+    sentNote.hidden = true;
+    s.body.append(sentNote);
     s.body.append(
       hideInput('Hide a word or phrase everywhere in this text…', (term) => {
         for (const e of findTerms(text, [term])) {
@@ -196,14 +250,38 @@ export function reviewText(text: string, entities: Entity[], opts: TextOpts): Pr
       }
     }
 
+    /** The masked text as the chatbot will see it (labels numbered like the vault does). */
+    function drawSent() {
+      const counters: Record<string, number> = {};
+      const seen = new Map<string, string>();
+      let pos = 0;
+      for (const e of chosen()) {
+        if (e.start > pos) preview.append(document.createTextNode(text.slice(pos, e.start)));
+        const key = `${e.type}|${e.value.trim().toLowerCase()}`;
+        if (!seen.has(key)) seen.set(key, `[${e.type}_${(counters[e.type] = (counters[e.type] ?? 0) + 1)}]`);
+        const tok = el('span', 'tok', seen.get(key)!);
+        tok.style.setProperty('--c', colorOf(e.type));
+        preview.append(tok);
+        pos = e.end;
+      }
+      if (pos < text.length) preview.append(document.createTextNode(text.slice(pos)));
+    }
+
     function draw() {
       const scroll = preview.scrollTop;
       preview.replaceChildren();
+      sentNote.hidden = view !== 'sent';
+      legendSlot.replaceChildren(
+        legend([...entities.filter((_, i) => on[i]).map((e) => e.type), ...groups().map(() => 'CUSTOM')]),
+      );
+      update();
+      if (view === 'sent') return drawSent();
       let pos = 0;
       entities.forEach((e, i) => {
         if (e.start > pos) plain(pos, e.start);
         const m = el('mark', 'hl', text.slice(e.start, e.end));
         m.style.setProperty('--c', colorOf(e.type));
+        m.dataset.label = labelOf(e.type);
         m.title = `${labelOf(e.type)} · ${sourceLabel(e.source, e.score, e.validated)} — click to toggle`;
         if (!on[i]) m.classList.add('off');
         m.addEventListener('click', () => {
@@ -215,10 +293,6 @@ export function reviewText(text: string, entities: Entity[], opts: TextOpts): Pr
       });
       if (pos < text.length) plain(pos, text.length);
       preview.scrollTop = scroll;
-      legendSlot.replaceChildren(
-        legend([...entities.filter((_, i) => on[i]).map((e) => e.type), ...groups().map(() => 'CUSTOM')]),
-      );
-      update();
     }
 
     /** Manual spans merged into phrases (neighbouring words become one placeholder). */
@@ -245,7 +319,7 @@ export function reviewText(text: string, entities: Entity[], opts: TextOpts): Pr
     const protect = button('', 'primary', () => finish({ action: 'protect', entities: chosen() }));
     function update() {
       const k = chosen().length;
-      protect.textContent = k ? `Protect ${k} & paste` : 'Paste without masking';
+      setLabel(protect, k ? `Protect ${k} & paste` : 'Paste without masking');
     }
 
     const left = el('div', 'left');
@@ -254,6 +328,8 @@ export function reviewText(text: string, entities: Entity[], opts: TextOpts): Pr
       deep.title = 'Also look for addresses, relatives, medical details with a local LLM';
       left.append(deep);
     }
+    left.append(keyHints('protect'));
+    s.onDismiss(() => finish({ action: 'cancel' }));
     s.footer.append(
       left,
       button('Cancel', 'ghost', () => finish({ action: 'cancel' })),
@@ -427,15 +503,18 @@ export function reviewFile(r: AnalyzeFileResponse): Promise<FileChoice> {
     );
     function update() {
       const k = [...on.values()].filter(Boolean).length + drawn() + terms.length;
-      protect.textContent = k ? `Protect ${k} & upload` : 'Upload';
+      setLabel(protect, k ? `Protect ${k} & upload` : 'Upload');
     }
     update();
+    const left = el('div', 'left');
+    left.append(keyHints('protect'));
     s.footer.append(
-      el('div', 'left'),
+      left,
       button('Cancel', 'ghost', () => finish({ action: 'cancel' })),
       button('Upload original', 'danger', () => finish({ action: 'original' })),
       protect,
     );
+    s.onDismiss(() => finish({ action: 'cancel' }));
     onKeys(s.overlay, () => protect.click(), () => finish({ action: 'cancel' }));
     protect.focus();
   });
@@ -456,6 +535,7 @@ export function offline(kind: 'paste' | 'upload', detail?: string): Promise<'ori
     const s = shell(
       detail ? 'Kavach could not scan this' : 'Kavach engine is not running',
       detail ?? 'Start it on this laptop with ./run.sh, then try again.',
+      null,
     );
     s.body.append(
       el('p', 'note', 'Nothing has been sent. You can cancel, or send the original without protection.'),
@@ -465,6 +545,7 @@ export function offline(kind: 'paste' | 'upload', detail?: string): Promise<'ori
       resolve(c);
     };
     const cancel = button('Cancel', 'primary', () => finish('cancel'));
+    s.onDismiss(() => finish('cancel'));
     s.footer.append(
       el('div', 'left'),
       button(kind === 'paste' ? 'Paste original anyway' : 'Upload original anyway', 'danger', () => finish('original')),
