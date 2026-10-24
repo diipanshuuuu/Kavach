@@ -1,0 +1,23 @@
+# Kavach local engine
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+python-multipart>=0.0.9
+httpx>=0.27
+
+# open-weight NER
+transformers>=4.44
+torch>=2.3
+
+# documents
+pypdfium2>=4.30
+pytesseract>=0.3.10
+pillow>=10.4
+opencv-python-headless>=4.10
+zxing-cpp>=2.2
+python-pptx>=1.0
+
+# tests, evaluation and demo samples
+pytest>=8
+faker>=28
+reportlab>=4.2

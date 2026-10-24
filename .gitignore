@@ -1,0 +1,22 @@
+# Python
+engine/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# downloaded model files (run.sh fetches them)
+engine/models/
+
+# extension build output
+extension/node_modules/
+extension/.output/
+extension/.wxt/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# local secrets (Cloud assist API key)
+.env.local
+*.env.local
