@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kavach Test Chat</title>
+<style>
+  :root { --bg:#f8fafc; --fg:#0f172a; --muted:#64748b; --line:#e2e8f0; --card:#fff; --me:#dbeafe; --bot:#f1f5f9; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0b1220; --fg:#e2e8f0; --muted:#94a3b8; --line:#1e293b; --card:#0f172a; --me:#1e3a8a; --bot:#111c33; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 820px; margin: 0 auto; padding: 16px; display:flex; flex-direction:column; gap:12px; min-height:100vh; }
+  h1 { font-size:18px; margin:4px 0 0; }
+  .hint { color:var(--muted); font-size:13px; margin:0; }
+  #log { flex:1; display:flex; flex-direction:column; gap:10px; }
+  .msg { padding:10px 12px; border-radius:12px; max-width:90%; white-space:pre-wrap; word-break:break-word; }
+  .me { background:var(--me); align-self:flex-end; }
+  .bot { background:var(--bot); align-self:flex-start; }
+  .files { display:flex; gap:8px; flex-wrap:wrap; }
+  .file { border:1px solid var(--line); border-radius:8px; padding:6px; font-size:12px; background:var(--card); max-width:260px; }
+  .file img { display:block; max-width:240px; max-height:200px; margin-top:4px; }
+  .composer { border:1px solid var(--line); border-radius:14px; background:var(--card); padding:10px; position:sticky; bottom:12px; }
+  .composer.drag { outline:2px dashed #2563eb; }
+  #editor { min-height:60px; max-height:240px; overflow:auto; outline:none; white-space:pre-wrap; }
+  #editor:empty::before { content:"Paste here, drop a file, or click 📎"; color:var(--muted); }
+  .bar { display:flex; gap:8px; align-items:center; margin-top:8px; }
+  .bar .sp { flex:1; }
+  button, label.btn { font:inherit; font-weight:600; border-radius:9px; padding:6px 12px; border:1px solid var(--line); background:transparent; color:var(--fg); cursor:pointer; }
+  #send { background:#1e3a8a; color:#fff; border-color:#1e3a8a; }
+  #pending { font-size:12px; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <h1>Kavach Test Chat</h1>
+    <p class="hint">A stand-in "cloud chatbot" for testing Kavach offline. The bot repeats what it received, so you can see exactly what would have left your laptop.</p>
+  </div>
+  <div id="log"></div>
+  <div class="composer" id="composer">
+    <div id="editor" contenteditable="true"></div>
+    <div class="bar">
+      <label class="btn" title="Attach file">📎<input id="file" type="file" multiple hidden /></label>
+      <span id="pending"></span>
+      <span class="sp"></span>
+      <button id="send" type="button">Send</button>
+    </div>
+  </div>
+</main>
+<script>
+  const editor = document.getElementById('editor');
+  const log = document.getElementById('log');
+  const fileInput = document.getElementById('file');
+  const composer = document.getElementById('composer');
+  const pendingEl = document.getElementById('pending');
+  let pending = [];
+
+  // Behave like a rich editor (ProseMirror/Quill): handle paste ourselves.
+  editor.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const files = [...(e.clipboardData?.files || [])];
+    if (files.length) return addFiles(files);
+    const text = e.clipboardData.getData('text/plain');
+    document.execCommand('insertText', false, text);
+  });
+  fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
+  composer.addEventListener('dragover', (e) => { e.preventDefault(); composer.classList.add('drag'); });
+  composer.addEventListener('dragleave', () => composer.classList.remove('drag'));
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    composer.classList.remove('drag');
+    if (e.dataTransfer?.files.length) addFiles([...e.dataTransfer.files]);
+  });
+
+  function addFiles(files) {
+    pending.push(...files);
+    pendingEl.textContent = pending.map((f) => `📄 ${f.name}`).join('  ');
+  }
+
+  function bubble(cls, text, files = []) {
+    const div = document.createElement('div');
+    div.className = `msg ${cls}`;
+    if (text) div.append(document.createTextNode(text));
+    if (files.length) {
+      const wrap = document.createElement('div');
+      wrap.className = 'files';
+      for (const f of files) {
+        const card = document.createElement('div');
+        card.className = 'file';
+        card.textContent = `${f.name} · ${(f.size / 1024).toFixed(1)} KB`;
+        if (f.type.startsWith('image/')) {
+          const img = document.createElement('img');
+          img.src = URL.createObjectURL(f);
+          card.append(img);
+        } else {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(f);
+          a.download = f.name;
+          a.textContent = ' (open what the bot received)';
+          card.append(a);
+        }
+        wrap.append(card);
+      }
+      div.append(wrap);
+    }
+    log.append(div);
+    div.scrollIntoView({ block: 'end' });
+  }
+
+  document.getElementById('send').addEventListener('click', () => {
+    const text = editor.innerText.trim();
+    const files = pending;
+    if (!text && !files.length) return;
+    bubble('me', text, files);
+    editor.textContent = '';
+    pending = [];
+    pendingEl.textContent = '';
+    setTimeout(() => {
+      const names = [...new Set(text.match(/\[[A-Z_]+_\d+\]/g) || [])];
+      let reply = 'Here is exactly what I (the cloud) received:\n\n' + (text || '(no text)');
+      if (files.length) reply += `\n\nFiles: ${files.map((f) => f.name).join(', ')}`;
+      if (names.length) reply += `\n\nDraft reply: Dear ${names[0]}, we have noted your details${names.length > 1 ? ' (' + names.slice(1).join(', ') + ')' : ''}. Thank you.`;
+      bubble('bot', reply);
+    }, 500);
+  });
+</script>
+</body>
+</html>
