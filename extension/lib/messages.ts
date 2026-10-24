@@ -8,6 +8,7 @@ import type {
   Entity,
   EntityType,
   HealthResponse,
+  MatchTermResponse,
   RenderResponse,
 } from './types';
 
@@ -24,6 +25,7 @@ export type Message =
       customBoxes: Record<string, number[][]>;
       terms: string[];
     }
+  | { type: 'MATCH_TERM'; job_id: string; term: string }
   | { type: 'VAULT_GET' }
   | { type: 'VAULT_CLEAR' }
   | { type: 'HEALTH' }
@@ -35,6 +37,7 @@ export interface Replies {
   ASSIGN: { placeholders: Record<string, string> };
   ANALYZE_FILE: AnalyzeFileResponse;
   RENDER: RenderResponse;
+  MATCH_TERM: MatchTermResponse;
   VAULT_GET: { tokens: Record<string, string> };
   VAULT_CLEAR: { ok: true };
   HEALTH: HealthResponse;

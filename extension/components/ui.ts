@@ -5,7 +5,7 @@
 import { colorOf, labelOf, sourceLabel } from '@/lib/colors';
 import { findTerms } from '@/lib/local-detect';
 import { addCustomTerm } from '@/lib/settings';
-import type { AnalyzeFileResponse, Entity } from '@/lib/types';
+import type { AnalyzeFileResponse, Entity, MatchTermResponse } from '@/lib/types';
 import { CSS } from './styles';
 
 let host: HTMLElement | null = null;
@@ -349,7 +349,8 @@ export type FileChoice =
   | { action: 'original' }
   | { action: 'cancel' };
 
-export function reviewFile(r: AnalyzeFileResponse): Promise<FileChoice> {
+/** matchTerm: where a typed word occurs in the file, so it can be marked before rendering. */
+export function reviewFile(r: AnalyzeFileResponse, matchTerm?: (term: string) => Promise<MatchTermResponse>): Promise<FileChoice> {
   return new Promise((resolve) => {
     const items = r.pages.flatMap((p) => p.items);
     const n = items.length;
@@ -361,6 +362,7 @@ export function reviewFile(r: AnalyzeFileResponse): Promise<FileChoice> {
     const toggles = new Map<string, HTMLElement[]>();
     const boxes: Record<string, number[][]> = {}; // page index -> boxes drawn by the user
     const terms: string[] = [];
+    const frames = new Map<string, (b: number[], cls: string) => HTMLElement>(); // page index -> add an overlay box
 
     const reg = (id: string, node: HTMLElement) => toggles.set(id, [...(toggles.get(id) ?? []), node]);
     const flip = (id: string) => {
@@ -378,16 +380,35 @@ export function reviewFile(r: AnalyzeFileResponse): Promise<FileChoice> {
       hideInput('Hide a word everywhere in this file…', (term) => {
         if (terms.some((t) => t.toLowerCase() === term.toLowerCase())) return;
         terms.push(term);
-        const chip = el('span', 'chip removable', `${term} ×`);
+        const marks: HTMLElement[] = [];
+        const chip = el('span', 'chip removable', matchTerm ? `${term} · looking… ×` : `${term} ×`);
         chip.style.setProperty('--c', colorOf('CUSTOM'));
         chip.title = 'Click to stop hiding';
         chip.addEventListener('click', () => {
           terms.splice(terms.indexOf(term), 1);
           chip.remove();
+          marks.forEach((m) => m.remove());
           update();
         });
         chips.append(chip);
         update();
+        matchTerm?.(term).then(
+          (m) => {
+            if (!chip.isConnected) return;
+            for (const [page, list] of Object.entries(m.boxes)) {
+              const add = frames.get(page);
+              if (add) for (const b of list) marks.push(add(b, 'box term'));
+            }
+            if (m.count) {
+              chip.textContent = `${term} · ${m.count} found ×`;
+            } else {
+              chip.textContent = `${term} · not found ×`;
+              chip.style.setProperty('--c', '#d97706');
+              chip.title = "Not found in this file's text (the scan may read it differently). Drag a box over it instead. Click to remove.";
+            }
+          },
+          () => chip.isConnected && (chip.textContent = `${term} ×`),
+        );
       }),
       chips,
     );
@@ -417,6 +438,14 @@ export function reviewFile(r: AnalyzeFileResponse): Promise<FileChoice> {
         div.style.width = `${((x1 - x0) / page.width) * 100}%`;
         div.style.height = `${((y1 - y0) / page.height) * 100}%`;
       };
+      frames.set(String(page.index), (b, cls) => {
+        const mark = el('div', cls);
+        pct(b, mark);
+        mark.style.setProperty('--c', colorOf('CUSTOM'));
+        mark.title = 'Hidden by you (typed word)';
+        frame.append(mark);
+        return mark;
+      });
       for (const it of page.items) {
         for (const b of it.boxes) {
           const box = el('div', 'box');

@@ -180,7 +180,7 @@ export default defineContentScript({
 
         // Always review files: even when nothing is found, the user can draw boxes.
         const items = analysis.pages.flatMap((p) => p.items);
-        const choice = await reviewFile(analysis);
+        const choice = await reviewFile(analysis, (term) => send({ type: 'MATCH_TERM', job_id: analysis.job_id, term }));
         if (choice.action === 'cancel') return null;
         const manualCount = Object.values(choice.action === 'protect' ? choice.customBoxes : {}).flat().length;
         if (choice.action === 'original' || (!choice.chosen.length && !manualCount && !choice.terms.length)) {

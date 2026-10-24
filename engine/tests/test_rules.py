@@ -60,3 +60,11 @@ def test_labelled_fields_and_names():
 
 def test_hindi_name_context():
     assert found("मेरा नाम सुनीता पाटिल है")["PERSON"] == ["सुनीता पाटिल"]
+
+
+def test_user_terms_survive_ocr_spacing():
+    ocr = "Flight: SF 657 - 24 OCT 2026\nPNR: ABC123 - Seat12A"
+    found = lambda term: [e.value for e in rules.find_terms(ocr, [term])]
+    assert found("Seat 12A") == ["Seat12A"]
+    assert found("SF 657 · 24 OCT 2026") == ["SF 657 - 24 OCT 2026"]
+    assert found("light") == []  # still whole words only

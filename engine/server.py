@@ -20,6 +20,8 @@ from schemas import (
     DetectRequest,
     DetectResponse,
     HealthResponse,
+    MatchTermRequest,
+    MatchTermResponse,
     RenderRequest,
     RenderResponse,
 )
@@ -86,6 +88,14 @@ async def analyze_file(
 async def render_redacted(req: RenderRequest) -> RenderResponse:
     try:
         return await run_in_threadpool(router.render_job, req)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/match-term", response_model=MatchTermResponse)
+async def match_term(req: MatchTermRequest) -> MatchTermResponse:
+    try:
+        return await run_in_threadpool(router.match_term, req)
     except KeyError as e:
         raise HTTPException(404, str(e))
 

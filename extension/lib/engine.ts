@@ -1,6 +1,6 @@
 // HTTP client for the local Kavach engine. Background worker only.
 
-import type { AnalyzeFileResponse, DetectResponse, HealthResponse, RenderResponse } from './types';
+import type { AnalyzeFileResponse, DetectResponse, HealthResponse, MatchTermResponse, RenderResponse } from './types';
 
 export const ENGINE_URL = 'http://127.0.0.1:8000';
 
@@ -55,3 +55,6 @@ export const renderRedacted = (
   custom_boxes: Record<string, number[][]>,
   terms: string[],
 ) => call<RenderResponse>('/render-redacted', json({ job_id, chosen, placeholders, custom_boxes, terms }), 120_000);
+
+export const matchTerm = (job_id: string, term: string) =>
+  call<MatchTermResponse>('/match-term', json({ job_id, term }), 30_000);

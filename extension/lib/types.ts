@@ -66,6 +66,11 @@ export interface RenderResponse {
   filename: string;
 }
 
+export interface MatchTermResponse {
+  count: number;
+  boxes: Record<string, number[][]>; // page index -> boxes in preview pixels
+}
+
 export interface Settings {
   enabled: boolean; // intercept pastes and uploads
   deep: boolean; // also run the Qwen3 deep scan

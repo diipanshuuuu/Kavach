@@ -192,6 +192,7 @@ STEP 8  ChatGPT replies "Dear [PERSON_1], ..."
 For a FILE the flow is similar but uses two engine calls:
   /analyze-file  (scan the file, return page previews with boxes)
   /render-redacted (after the user reviews, produce the cleaned file)
+  (/match-term marks any word the user types on the previews first)
 and content.ts hands the cleaned file to the website instead of the
 original.
 
@@ -208,6 +209,8 @@ engine/server.py  (the front door)
     POST /detect           text -> list of entities
     POST /analyze-file     file -> pages with previews and boxes
     POST /render-redacted  user's choices -> cleaned file
+    POST /match-term       a word typed in the file review card -> where it
+                           occurs, so the card can mark it before uploading
     GET  /test             a fake chatbot page for offline testing
   HOW:
     - At startup the NER model loads in a BACKGROUND THREAD, so the server
