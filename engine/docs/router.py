@@ -8,6 +8,7 @@ match_term(job_id, word) shows the user where a typed word will be hidden before
 """
 
 import base64
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -32,6 +33,7 @@ MIME = {
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
 MANUAL_LABEL = "[HIDDEN]"
+log = logging.getLogger("kavach.files")
 
 
 class UnsupportedFile(Exception):
@@ -240,6 +242,9 @@ def render_job(req: RenderRequest) -> RenderResponse:
     if job is None:
         raise KeyError("This scan expired. Please upload the file again.")
     state = job.data
+    # Counts only, never values: enough to tell whether manual hiding reached the engine.
+    log.info("render %s: %d items, %d drawn boxes on pages %s, %d typed words", job.kind, len(req.chosen),
+             sum(len(v) for v in req.custom_boxes.values()), sorted(req.custom_boxes), len(req.terms))
 
     if job.kind == "image":
         page = state["pages"][0]
