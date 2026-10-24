@@ -20,3 +20,6 @@ extension/.wxt/
 # local secrets (Cloud assist API key)
 .env.local
 *.env.local
+
+# installer output
+dist/

@@ -8,7 +8,14 @@ export default defineConfig({
     // The local engine. Nothing else is ever contacted.
     host_permissions: ['http://127.0.0.1:8000/*'],
     ...(browser === 'firefox' && {
-      browser_specific_settings: { gecko: { id: 'kavach@nst-hackday', strict_min_version: '128.0' } },
+      browser_specific_settings: {
+        gecko: {
+          id: 'kavach@nst-hackday',
+          strict_min_version: '128.0',
+          // Kavach collects and transmits nothing.
+          data_collection_permissions: { required: ['none'] },
+        },
+      },
     }),
   }),
 });
