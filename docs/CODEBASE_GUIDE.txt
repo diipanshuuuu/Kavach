@@ -1,0 +1,822 @@
+================================================================================
+                    KAVACH: HOW THE WHOLE CODEBASE WORKS
+           A guide for the team (read this before the evaluation)
+================================================================================
+
+HOW TO READ THIS
+  Part 1  The big picture (read this even if you read nothing else)
+  Part 2  Words you need to know
+  Part 3  One paste, followed step by step through the code
+  Part 4  The engine (Python), file by file
+  Part 5  The extension (TypeScript), file by file
+  Part 6  Tests, evaluation and demo files
+  Part 7  Small files at the top of the repo
+  Part 8  Why we built it this way (design decisions)
+  Part 9  Questions judges may ask, with answers
+  Part 10 Honest limitations
+  Part 11 How to run the demo
+
+
+================================================================================
+PART 1: THE BIG PICTURE
+================================================================================
+
+THE PROBLEM
+  People paste bank letters, salary slips and Aadhaar cards into ChatGPT,
+  Gemini and Claude. The moment they press paste, their Aadhaar number, PAN,
+  phone number and bank account go to that company's servers. They can't
+  take it back. (Problem statement #3: PII redaction for Indian documents
+  and languages.)
+
+WHAT KAVACH DOES
+  Kavach ("armour") is a browser extension that stands between you and the
+  chatbot:
+
+    You paste or upload
+      -> Kavach catches it BEFORE the website sees it
+      -> finds the private data (on your own laptop)
+      -> shows you a review card so you decide what to hide
+      -> replaces private data with labels like [PERSON_1], [AADHAAR_1]
+      -> only that safe version goes to the chatbot
+      -> when the chatbot replies with [PERSON_1], Kavach shows you the
+         real name again, ON YOUR SCREEN ONLY
+
+  The chatbot can still help (it understands the sentence), but it never
+  learns who you are.
+
+THE TWO PROGRAMS
+  1. The EXTENSION (folder: extension/, language: TypeScript)
+     A Chrome/Firefox add-on. It is the "guard at the door". It catches
+     pastes and uploads on chatbot websites, shows the review card, swaps
+     in placeholders, and puts real values back in replies.
+
+  2. The ENGINE (folder: engine/, language: Python)
+     A small server that runs ON YOUR OWN LAPTOP at the address
+     127.0.0.1:8000 ("this computer only"). It is the "expert in the back
+     room". It holds the AI models that recognise private data, and it
+     reads and edits images, PDFs and PowerPoint files.
+
+  Why two programs? AI models run easily in Python; browser extensions must
+  be JavaScript/TypeScript. So the extension sends the text to the engine
+  and asks "what is private in here?".
+
+  THE KEY PRIVACY POINT: both programs are on the user's laptop. While
+  Kavach inspects your data, the data never goes over the internet.
+
+HOW PRIVATE DATA IS FOUND: THREE "INSPECTORS" (LAYERS)
+  Layer 1  Rules + checksums   IDs and numbers (Aadhaar, PAN, phone, card,
+                               bank account, email, UPI, IFSC, DOB, PIN...)
+                               and form fields ("Name: ...", "Address: ...")
+  Layer 2  NER model (AI)      Names, places, organisations in normal
+                               sentences, including Hindi and Marathi
+  Layer 3  Qwen3-4B (AI, opt.) A small local LLM for "deep scan": addresses,
+                               relatives, medical details, employee IDs
+
+  Their results are merged. When two layers flag overlapping text, the
+  more trustworthy one wins.
+
+THE RESULT WE MEASURED (on 150 fake documents we generated)
+  Rules only            recall 68.9%   precision 100%   ~0 ms per document
+  Rules + NER model     recall 97.3%   precision 100%   58 ms per document
+  + Qwen3 (30 docs)     recall 99.3%   precision 86%    ~4 s per document
+
+  Meaning: rules never raise false alarms but miss names. The open-source
+  AI model is what lifts detection from 69% to 97%. The LLM finds a little
+  more but over-flags and is slow, so it is an optional button.
+
+WHAT ELSE IT HANDLES
+  - Images (photos of ID cards, screenshots, boarding passes): OCR reads
+    the text, private words get black boxes with the placeholder written
+    inside, QR codes / barcodes and faces are blurred.
+  - PDFs: same, and the PDF is REBUILT FROM IMAGES so no hidden text
+    survives under the black boxes.
+  - PowerPoint (.pptx): text, tables and speaker notes are rewritten,
+    pictures inside slides are redacted, author name is removed.
+  - Manual hiding: click any word, type a phrase, drag a box on a file,
+    or keep an "Always hide" list (your name, company...).
+  - If the engine is not running: the extension has its own copy of the
+    Layer 1 rules, so IDs and numbers are still hidden with no network.
+
+
+================================================================================
+PART 2: WORDS YOU NEED TO KNOW
+================================================================================
+
+  Extension        A browser add-on (like an ad-blocker).
+  Engine           Our Python program that holds the AI. Runs locally.
+  127.0.0.1        "This computer". A server here can't be reached from
+                   the internet.
+  Port 8000        The "door number" the engine listens on.
+  API / endpoint   A web address the engine answers, e.g. /detect.
+  Entity           One finding: {start, end, type, value, source, score,
+                   validated}. "Characters 9 to 21 are a PERSON."
+  Offset           A character position in the text (start/end). Masking,
+                   highlighting and box drawing all depend on these.
+  Placeholder      A label like [PERSON_1] that replaces the real value.
+  Vault            Kavach's private notebook: [PERSON_1] = "Rahul Sharma".
+  Rehydration      Putting real values back into the chatbot's reply on
+                   screen (our word for "restoring").
+  Regex            A text pattern, e.g. "12 digits" or "5 letters 4 digits
+                   1 letter".
+  Checksum         A maths check that proves a number is real, not just the
+                   right length. Aadhaar uses VERHOEFF, cards use LUHN.
+  NER              Named Entity Recognition: AI that finds names of people,
+                   places and organisations.
+  Open-weight      An AI model anyone can download and run (unlike ChatGPT).
+  LLM              Large Language Model (ChatGPT-like). Ours is Qwen3-4B.
+  Ollama           A free tool that runs LLMs on your own laptop.
+  OCR              Optical Character Recognition: reading text in a picture.
+                   We use Tesseract.
+  Content script   The part of an extension that runs INSIDE a website.
+  Background worker The part of an extension that runs separately and can
+                   make network calls.
+  Shadow DOM       A sealed box on a web page. Our review card lives in one
+                   so the chatbot's code can't style it or read it.
+  Capture phase    Browser events travel DOWN the page first, then back UP.
+                   Listening in the capture phase means we hear the event
+                   before the website's own code does.
+
+
+================================================================================
+PART 3: ONE PASTE, FOLLOWED THROUGH THE CODE
+================================================================================
+
+Priya pastes this into ChatGPT:
+  "Dear Mr. Rahul Sharma, your Aadhaar 7260 1815 9082 is linked to PAN
+   ABCPE1234F."
+
+STEP 1  extension/entrypoints/content.ts
+        Our "paste" listener runs first (capture phase). It checks the
+        paste is going into the chat box, STOPS the event (so ChatGPT
+        never receives it) and calls protectText().
+
+STEP 2  extension/lib/messages.ts  ->  extension/entrypoints/background.ts
+        The content script can't call the engine itself (browsers block
+        https websites from calling http://127.0.0.1), so it sends a
+        DETECT message to the background worker.
+
+STEP 3  extension/lib/engine.ts
+        The background worker sends the text to
+        POST http://127.0.0.1:8000/detect, together with the user's
+        "always hide" words.
+
+STEP 4  engine/server.py  ->  engine/detect/__init__.py  detect()
+        a. normalize.py   converts Indian-script digits to 0-9
+        b. rules.py       finds "7260 1815 9082" (passes Verhoeff ->
+                          AADHAAR), "ABCPE1234F" (valid PAN), and
+                          "Rahul Sharma" (follows "Dear Mr.")
+        c. ner.py         the AI model also finds "Rahul Sharma"
+        d. merge.py       removes the duplicate; the rule wins
+        The engine replies with the list of entities and the timings.
+
+STEP 5  extension/components/ui.ts  reviewText()
+        The review card shows the text with coloured highlights. Priya can
+        click a highlight to keep it visible, or click other words to hide
+        them. She clicks "Protect 3 & paste".
+
+STEP 6  background.ts (MASK)  ->  lib/vault.ts + lib/mask.ts
+        vault.ts hands out placeholders ([PERSON_1], [AADHAAR_1], [PAN_1])
+        and remembers the real values. mask.ts builds:
+        "Dear Mr. [PERSON_1], your Aadhaar [AADHAAR_1] is linked to PAN
+         [PAN_1]."
+
+STEP 7  content.ts insertText()
+        Puts the masked text into ChatGPT's box, the way ChatGPT expects.
+
+STEP 8  ChatGPT replies "Dear [PERSON_1], ..."
+        extension/lib/rehydrate.ts notices new text on the page, finds
+        [PERSON_1], looks it up in the vault, and shows "Rahul Sharma" on
+        Priya's screen. A green pill appears: "Showing 3 real values on
+        your screen only" with the button "Show what the chatbot saw".
+
+For a FILE the flow is similar but uses two engine calls:
+  /analyze-file  (scan the file, return page previews with boxes)
+  /render-redacted (after the user reviews, produce the cleaned file)
+and content.ts hands the cleaned file to the website instead of the
+original.
+
+
+================================================================================
+PART 4: THE ENGINE (engine/, Python)
+================================================================================
+
+engine/server.py  (the front door)
+  WHAT: Defines the web addresses the extension calls, using FastAPI.
+    GET  /health           Is the NER model loaded? Ollama? Tesseract?
+                           (the green/red dot in the popup)
+    GET  /info             Which models are active (shown in the popup)
+    POST /detect           text -> list of entities
+    POST /analyze-file     file -> pages with previews and boxes
+    POST /render-redacted  user's choices -> cleaned file
+    GET  /test             a fake chatbot page for offline testing
+  HOW:
+    - At startup the NER model loads in a BACKGROUND THREAD, so the server
+      starts instantly instead of waiting ~10 seconds.
+    - Heavy work runs with run_in_threadpool so the server stays
+      responsive.
+    - Files over 25 MB are refused.
+    - CORS allows any origin. That is safe ONLY because the server listens
+      on 127.0.0.1, which nothing outside the laptop can reach.
+
+engine/schemas.py  (the data contract)
+  WHAT: Exact shapes of all data sent between extension and engine,
+    using Pydantic (which rejects malformed requests automatically).
+    - Entity: start, end, type, value, source, score, validated
+    - EntityType: PERSON, LOCATION, ORG, ADDRESS, MEDICAL, OTHER, AADHAAR,
+      VID, PAN, GSTIN, VOTER_ID, PASSPORT, DL, VEHICLE, IFSC,
+      BANK_ACCOUNT, CARD, UPI, PHONE, EMAIL, DOB, PINCODE, QR, FACE, CUSTOM
+    - Source: rule, ner, llm, vision, user
+    - DetectRequest (text, deep, terms), FileItem, FilePage,
+      AnalyzeFileResponse (job_id + pages), RenderRequest (chosen ids,
+      placeholders, custom_boxes, terms), RenderResponse
+  WHY: Both sides must agree on the format. extension/lib/types.ts is
+    the TypeScript mirror. RULE: change both in the same commit.
+
+--------------------------------------------------------------------------------
+engine/detect/  (finding private data)
+--------------------------------------------------------------------------------
+
+detect/__init__.py  (the conductor)
+  The ONE function everything calls: detect(text, deep, terms)
+    1. normalize the text
+    2. rules.find() + rules.find_terms() (the user's always-hide words)
+    3. ner.find()
+    4. llm.find() only if deep scan is on
+    5. merge() everything
+  It also times each layer (the "rules 0 ms · NER 58 ms" on the card).
+
+detect/normalize.py  (digit translator)
+  WHAT: Turns digits in 10 scripts (Devanagari ०-९, Bengali, Gujarati,
+    Gurmukhi, Odia, Tamil, Telugu, Kannada, Malayalam, full-width) into
+    0-9, and odd spaces into normal spaces.
+  WHY: So "आधार ८१६४ ३०३९ ९०५१" passes the same Aadhaar checks.
+  IMPORTANT: it replaces ONE character with ONE character, so the text
+    length and all offsets stay the same. An assert checks this.
+
+detect/validators.py  (the maths checks)
+  - verhoeff_ok(): the Aadhaar checksum. Walks the digits backwards
+    through two lookup tables (_D and _P). Valid if the result is 0.
+    It catches every single-digit typo and almost every swap of two
+    neighbouring digits. This is the same algorithm UIDAI uses.
+  - verhoeff_check_digit(): CREATES the correct last digit. Used to make
+    fake-but-valid Aadhaar numbers for tests and demo files.
+  - aadhaar_ok(): 12 digits, first digit 2-9, passes Verhoeff.
+  - vid_ok(): 16-digit Aadhaar Virtual ID, passes Verhoeff.
+  - luhn_ok(): card numbers. Double every second digit from the right,
+    sum must be divisible by 10.
+  - pan_ok(): format AAAAA9999A, and the 4th letter must be a real
+    holder type (P person, C company, H HUF, F firm, A, T, B, L, J, G).
+  - gstin_ok(): 2-digit state code (01-38) + a valid PAN + entity digit
+    + "Z" + a mod-36 check character.
+  - ifsc_ok(): 4 letters + "0" + 6 letters/digits.
+  WHY: A regex only says "looks like an Aadhaar". The checksum says "is a
+    structurally real Aadhaar". This is why order IDs, tracking numbers
+    and timestamps are NOT flagged. It is our zero-false-alarm secret.
+
+detect/rules.py  (Layer 1)
+  A list of Rule objects. Each rule = a regex + optional extras:
+    validator       a checksum. Pass -> score 1.0, validated=True.
+    fallback_score  if the checksum fails but a context word (like
+                    "Aadhaar") is nearby, keep it at lower confidence
+                    (handles typos).
+    context         words that should appear just before the match.
+    context_required  e.g. a 9-18 digit number is a BANK_ACCOUNT only if
+                    "A/c", "account", "खाता" is within 50 characters.
+                    Same idea for PASSPORT, DOB and PINCODE.
+    exclude         words meaning "this is something else": order,
+                    tracking, invoice, txn, ref, ticket, booking, pnr.
+  The find() loop for every match: skip if an exclude word is near ->
+    check context -> skip if required context is missing -> run the
+    checksum -> create an Entity.
+  Regex details worth knowing:
+    (?<!\d) and (?!\d) stop us matching part of a longer number.
+    EMAIL vs UPI: an email has a dot after @ (a@gmail.com); a UPI ID
+    doesn't (a@okaxis).
+  Three extra detectors:
+    _labelled_fields(): text after labels like "Name:", "Father's Name:",
+      "Address:", "पता:", "Passenger:", "PNR:", "Employee ID:" up to the
+      end of the line (or a 3+ space gap = next column). Also S/o, W/o.
+    _context_names(): names after cues: "Dear", "Mr.", "Dr.", "Smt.",
+      "Billed to", "I am", "my name is", "मेरा नाम ... है". The name must be
+      Capitalised, and words like "Sir", "Team" are excluded.
+    find_terms(): the user's own always-hide words, case-insensitive,
+      whole words only. Source = "user", type = CUSTOM.
+  WHY: IDs have fixed formats, so rules are fast (under 1 ms) and exact.
+
+detect/ner.py  (Layer 2, the AI name finder)
+  WHAT: Runs an open-weight NER model with Hugging Face Transformers.
+    It tries ai4bharat/IndicNER first (best for 11 Indian languages, but
+    "gated": it needs a Hugging Face login + approval). If that fails it
+    uses Davlan/xlm-roberta-base-wikiann-ner (multilingual, works now).
+    You can override with the KAVACH_NER_MODEL environment variable.
+  HOW (each step fixes a real problem we hit):
+    1. _sentences(): split text into sentences and run them as a batch.
+       WHY: on long text the model got confused and missed "Rahul
+       Sharma"; one sentence at a time it finds it. It knows "Mr." does
+       not end a sentence and that "।" is the Hindi full stop.
+    2. _expand(): the model returns word pieces ("सुन" + "ीता पाटिल"); we
+       grow each piece to whole words. Indian combining marks (matras)
+       count as letters.
+    3. Join neighbouring pieces of the same type ("Rahul" + "Sharma").
+    4. Honorific fix: "Mr. X" tagged as ORG is changed to PERSON.
+    5. _keep() removes noise. The model over-tags form labels and
+       headings ("Basic Salary", "Mobile", "Regards") as organisations.
+       We drop anything with digits, ":", "/" or a newline; label words;
+       everyday words (help, number, form...); and ORGs unless they
+       contain a company word (Pvt, Ltd, Bank, School...) or are Title
+       Case English. Minimum scores: PERSON 0.5, LOCATION 0.7, ORG 0.9.
+  WHY: Names have no pattern. Only AI can find "Priya Deshmukh agreed to
+    ship on Friday". This layer is what lifts recall from 69% to 97%.
+
+detect/llm.py  (Layer 3, optional deep scan)
+  WHAT: Sends the text to Qwen3-4B running in Ollama on the laptop.
+  HOW:
+    - think=false (skips slow reasoning), temperature 0, and a JSON
+      schema so the answer always has the same shape.
+    - The model returns the private TEXT; our code finds where it is with
+      str.find(). We NEVER trust the model's positions, and anything the
+      model invents that isn't in the text is thrown away.
+    - 25-second deadline, 3000-character chunks.
+    - available() checks Ollama is running with the model pulled.
+  WHY: Catches meaning-based items like "diagnosed with diabetes" or an
+    employee code. Off by default because it is slow and over-flags.
+
+detect/merge.py  (the referee)
+  WHAT: Turns all findings into one clean, non-overlapping list.
+  HOW:
+    Priority: user 6 > rule 3 = vision 3 > ner 2 > llm 1,
+    +1 if a checksum passed. ADDRESS always gets 4 (hiding the whole
+    address beats hiding only the town inside it: hiding more is safer).
+    Sort by priority, then length, then score; keep each finding that
+    doesn't overlap one already kept.
+    The user's own words always win, EXCEPT when a bigger finding already
+    covers them (so the always-hide word "Kothrud" doesn't break up a
+    detected full address).
+    An allowlist drops public names: RBI, UIDAI, "Government of India",
+    bank names, UPI, ChatGPT...
+
+--------------------------------------------------------------------------------
+engine/docs/  (files: images, PDFs, PowerPoint)
+--------------------------------------------------------------------------------
+
+docs/page.py  (where each letter is)
+  WHAT: PageText = the page's text + one rectangle per character
+    (char_boxes has the same length as text).
+  boxes_for_span(start, end): converts "characters 40-54 are an Aadhaar"
+    into one rectangle PER LINE the text touches, with 3 px padding.
+  WHY: Detection works on text positions; redaction needs pixels. This
+    is the bridge. Both PDF text and OCR produce a PageText, so the rest
+    of the code doesn't care which one it got.
+
+docs/ocr.py  (reading pictures)
+  - open_image(): opens the file and fixes EXIF rotation (phone photos
+    are often stored sideways).
+  - ocr_page(): grayscale; upscale 2x if the image is small (under
+    1400 px), because OCR is bad on tiny text; run Tesseract with the
+    installed languages from eng+hin+mar; ignore words under 30%
+    confidence; spread each word's box evenly across its letters so a
+    partial match gets a partial box; rebuild the text with spaces and
+    newlines.
+
+docs/pdf.py  (PDFs)
+  For each page (max 20): render the page as an image at 170 DPI, and
+  read the PDF's text layer with an exact box for every character
+  (flipping the y axis, because PDFs measure from the bottom). If the
+  page has fewer than 20 real characters, it's a SCAN, so use OCR instead.
+  Uses pypdfium2 (Google's PDFium engine).
+
+docs/visual.py  (things that aren't text)
+  - find_codes(): finds QR codes AND barcodes (PDF417 and Aztec on
+    boarding passes, DataMatrix, normal 1D barcodes) with zxing-cpp, and
+    OpenCV's QR detector as a backup. Overlaps removed, 8% padding.
+    It only finds WHERE codes are; it never reads their contents.
+  - find_faces(): YuNet face detector (a small neural network file in
+    engine/models/, downloaded by run.sh), 25% padding.
+  WHY: The Aadhaar QR code contains name, date of birth, address and
+    photo. A boarding-pass barcode contains the name and PNR. Hiding the
+    printed text isn't enough.
+
+docs/render.py  (drawing the redactions)
+  - _label_box(): a black rectangle with the placeholder (e.g.
+    [AADHAAR_1]) written in white. The font shrinks until it fits; if it
+    still doesn't fit, the box is widened (covering more is always safe).
+  - _blur(): shrink the area 16x, scale it back up with no smoothing
+    (pixelation), then Gaussian blur. Used for faces and codes.
+  - images_to_pdf(): saves page images as a new PDF. The original text
+    layer is gone, so nothing can be copied from under a black box.
+  - preview(): a smaller JPEG (max 1100 px) for the review card.
+  WHY placeholders inside the boxes: the chatbot can read "[AADHAAR_1]"
+    in the image and refer to it, and Kavach can restore it in the reply.
+
+docs/pptx_redact.py  (PowerPoint)
+  - walk(): goes through every slide, shape, group, EVERY table cell,
+    speaker notes, and pictures, ALWAYS IN THE SAME ORDER. Each paragraph
+    gets a key like "s1-p4" (slide 1, item 4).
+    WHY: analyze and render open the file separately; the same walk
+    gives the same keys, so render finds the right paragraph.
+  - para_text() / set_para_text(): PowerPoint often splits "Rahul Sharma"
+    into several pieces ("runs") with different formatting. We detect on
+    the WHOLE paragraph, then put the masked text in the first run
+    (keeping its font) and empty the others.
+  - replace_picture(): swaps a picture's image bytes for the redacted one.
+  - scrub_metadata(): blanks author, title, subject, keywords, etc.
+
+docs/jobs.py  (short-term memory)
+  A dictionary job_id -> scan state, kept IN MEMORY ONLY (never on disk),
+  deleted after 15 minutes. It keeps the decoded page images and findings
+  between "scan" and "render".
+
+docs/router.py  (the traffic controller for files)
+  - kind_of(): image / pdf / pptx from the file extension or type.
+  - analyze():
+      image -> OCR -> _find_items()
+      pdf   -> read_pdf() page by page -> _find_items()
+      pptx  -> detect() on every paragraph directly; every picture is
+               OCR'd and gets its own preview page (so users can draw on
+               it). Old .ppt files are converted with LibreOffice if it
+               is installed.
+    _find_items() = run detect() on the page text, turn each finding into
+    boxes with boxes_for_span(), then add code and face boxes.
+    Boxes are scaled down to match the preview image.
+  - render_job(): for each page, _regions() collects:
+      the items the user kept ticked,
+      the boxes the user DREW (scaled back up from preview size),
+      the user's extra words (found again in the page text).
+    Then render.redact() draws. PDFs are rebuilt from images; PPTX is
+    edited in place and saved.
+  Output files are named <original>_kavach.<ext>.
+
+--------------------------------------------------------------------------------
+engine/dev/test.html  (fake chatbot)
+--------------------------------------------------------------------------------
+  Served at http://127.0.0.1:8000/test. It has a chat box that handles
+  pastes the way ProseMirror/Quill do, a 📎 button, drag-and-drop, and a
+  "bot" that repeats exactly what it received. Use it to test or demo
+  without the internet, and to PROVE what would have left the laptop.
+
+
+================================================================================
+PART 5: THE EXTENSION (extension/, TypeScript)
+================================================================================
+
+FIRST, HOW CHROME EXTENSIONS ARE SPLIT (this explains the design)
+  Part               File                   Can                       Cannot
+  Content script     entrypoints/content.ts see and change the page   call 127.0.0.1
+  Background worker  entrypoints/background call the engine, hold    see the page
+                     .ts                    the vault
+  Popup              entrypoints/popup/     settings window           -
+  So the content script SENDS MESSAGES to the background worker, which
+  does all network work. The message list is in lib/messages.ts.
+
+--------------------------------------------------------------------------------
+entrypoints/
+--------------------------------------------------------------------------------
+
+entrypoints/content.ts  (the guard, runs inside chatbot pages)
+  Runs on chatgpt.com, chat.openai.com, gemini.google.com, claude.ai,
+  perplexity.ai, copilot.microsoft.com, chat.deepseek.com and our test
+  page. It starts at document_start, BEFORE the page's own scripts.
+
+  CORE TRICK: listen on window in the CAPTURE PHASE (third argument
+  "true"), so we hear paste/drop/change events before the site does.
+  Then preventDefault() + stopImmediatePropagation() so the site never
+  receives the original.
+
+  Our own re-sent events are put in a WeakSet called "ours" and ignored,
+  so we don't catch our own output in a loop.
+
+  1. TEXT PASTE -> protectText():
+     DETECT -> review card -> MASK -> insertText().
+     The "Deep scan" button simply loops again with deep=true.
+     If the engine fails with a real error, the "could not scan" card
+     appears. It NEVER pastes silently.
+     With the engine, a paste with nothing found goes straight in. In
+     browser-only mode the card is always shown, so the user can hide
+     names by hand.
+
+  2. FILE via the 📎 button -> catches "change" on <input type=file>,
+     scans, then puts the cleaned file into input.files (using a
+     DataTransfer object) and re-fires the events.
+  3. DRAG & DROP and PASTED FILES (screenshots) -> the cleaned file is
+     re-sent in a new DragEvent / ClipboardEvent. If the site doesn't
+     take it, it falls back to the site's file input.
+     After every file, a toast offers "Download" of the protected copy in
+     case the site ignored it. Files ending in _kavach are let through
+     untouched (already protected).
+
+  insertText() (the hardest part):
+    - plain <textarea>: document.execCommand('insertText'), falling back
+      to setRangeText + an input event.
+    - rich editors (ChatGPT/Claude use ProseMirror, Gemini uses Quill):
+      we dispatch a synthetic PASTE event containing the masked text,
+      because that keeps line breaks; if after 60 ms nothing changed, we
+      fall back to execCommand.
+    - saveCaret()/restoreCaret() remember where the cursor was while the
+      review card was open.
+
+  At the end it starts the rehydrator and the green pill.
+
+entrypoints/background.ts  (the hub)
+  - detectWithFallback(): try the engine; if it's OFFLINE, use
+    lib/local-detect.ts (the in-browser rules) and mark mode "browser".
+    Any other error is passed on (shown to the user).
+  - MASK: vault.assign() gives placeholders, addStats() counts them,
+    applyMask() builds the masked string.
+  - ASSIGN: same for file items. Codes and faces get no placeholder
+    (they're blurred, not labelled).
+  - ANALYZE_FILE / RENDER: forward to the engine (adds always-hide words).
+  - VAULT_GET / VAULT_CLEAR, HEALTH, INFO.
+  Uses the sendResponse + "return true" pattern so async replies work in
+  both Chrome and Firefox.
+
+entrypoints/popup/index.html, main.ts, style.css  (the settings window)
+  - Engine status (green/red dot) and which models are active.
+  - Toggles: Protect pastes & uploads / Deep scan / Show real values in
+    replies.
+  - "Always hide" list (one word or phrase per line).
+  - Stats: how many items of each type were protected.
+  - "Forget all placeholders" (clears the vault and stats).
+
+--------------------------------------------------------------------------------
+components/
+--------------------------------------------------------------------------------
+
+components/ui.ts  (all on-page UI)
+  - One host element <kavach-root> with a CLOSED Shadow DOM. Closed means
+    the chatbot's own scripts can't read inside it (the card shows your
+    original text). Key presses inside our UI are stopped from reaching
+    the site (otherwise Enter could send the chat message).
+    Automated tests build with VITE_KAVACH_OPEN_SHADOW=1 to open it.
+  - reviewText(): every plain word is a clickable <span>, every finding a
+    coloured <mark>. Click a mark = keep it visible. Click a word = hide
+    it. groups() merges neighbouring hidden words into one placeholder.
+    The "Hide a word or phrase" box uses findTerms() and can save to the
+    always-hide list. Shows timings and, in browser-only mode, a notice.
+  - reviewFile(): page previews with boxes positioned in PERCENT (so they
+    scale with the card), a row list with checkboxes, drag-to-draw boxes
+    (pointer events -> converted back to preview pixels; click a drawn
+    box to remove it), and a "hide a word in this file" box with chips.
+  - loading(), offline(), toast(), restorePill() (the green "Showing N
+    real values" bar with the "Show what the chatbot saw" switch).
+
+components/styles.ts  (the CSS for the shadow DOM)
+  Light/dark colours, highlights, boxes, hatched manual boxes, buttons,
+  toast, pill. Lives in a TS string because it is injected into the
+  shadow root.
+
+--------------------------------------------------------------------------------
+lib/  (shared helpers)
+--------------------------------------------------------------------------------
+
+lib/types.ts      TypeScript copy of engine/schemas.py, plus Settings
+                  (enabled, deep, restore, customTerms) and Stats.
+lib/messages.ts   The list of messages (DETECT, MASK, ASSIGN, ANALYZE_FILE,
+                  RENDER, VAULT_GET, VAULT_CLEAR, HEALTH, INFO) and send(),
+                  which unwraps {ok, data} / {ok: false, error}.
+lib/engine.ts     fetch() calls to 127.0.0.1:8000 with timeouts. A network
+                  failure becomes EngineOffline.
+lib/vault.ts      The notebook. byKey "PAN|ABCPE1234F" -> "[PAN_1]",
+                  byToken "[PAN_1]" -> "ABCPE1234F", counters per type.
+                  keyOf() normalises: numbers to digits only (so
+                  "7260 1815 9082" and "726018159082" are the same),
+                  names to lowercase. Writes are queued one after another
+                  (a promise chain) so two fast pastes can't get the same
+                  number. Stored in storage.session: memory only, wiped
+                  when the browser closes.
+lib/mask.ts       applyMask(): replaces spans FROM THE END BACKWARDS so the
+                  earlier offsets stay correct. TOKEN_RE finds [TYPE_N].
+lib/rehydrate.ts  Watches the page with a MutationObserver (200 ms
+                  debounce, because replies arrive word by word). In every
+                  text node containing "[", it swaps known tokens for real
+                  values. It ONLY EDITS TEXT, never adds or removes page
+                  elements, so React-based chat sites don't break. It
+                  remembers each node's original text, so "Show what the
+                  chatbot saw" can put the tokens back. Skips text boxes
+                  and our own UI.
+lib/local-detect.ts  A line-for-line TypeScript copy of normalize.py,
+                  validators.py, rules.py (including labelled fields, name
+                  cues and user words) and merge.py. Used when the engine
+                  is offline. We checked it gives IDENTICAL results to the
+                  Python version on 157 documents. ui.ts also uses its
+                  findTerms() for "hide a phrase".
+lib/files.ts      isScannable() (png, jpg, webp, pdf, ppt, pptx),
+                  isProtected() (name ends _kavach), base64 <-> File,
+                  download(), toDataTransfer().
+lib/settings.ts   Settings and stats in storage.local; addCustomTerm().
+lib/colors.ts     A colour and a human label for each type, and the
+                  "found by" text (Rule · checksum ✓, NER model 0.94, You).
+
+--------------------------------------------------------------------------------
+Other extension files
+--------------------------------------------------------------------------------
+wxt.config.ts     Builds the manifest. Permissions: "storage" only, and
+                  the engine address http://127.0.0.1:8000. Nothing else.
+                  A Firefox ID is added for the Firefox build.
+package.json      Scripts: npm run dev (Chrome with hot reload),
+                  npm run build, npm run build:firefox. Uses WXT + Vite.
+public/icon/      The shield icons (16-128 px).
+.output/          Built extension (NOT in git). Load
+                  .output/chrome-mv3 in chrome://extensions.
+
+
+================================================================================
+PART 6: TESTS, EVALUATION AND DEMO FILES
+================================================================================
+
+engine/tests/  (14 automatic tests, run: cd engine && .venv/bin/python -m pytest tests)
+  test_validators.py  Verhoeff reference example; 500 random Aadhaar
+                      numbers pass and every one-digit change fails; Luhn;
+                      PAN holder type; GSTIN; IFSC.
+  test_rules.py       every ID type; Hindi digits; 4 phone formats;
+                      context rules (account only near "A/c", DOB only
+                      near "Date of birth"); DECOYS ignored (order ID,
+                      invoice, timestamp, TXN number); labelled fields;
+                      "Dear Mr. Amit Verma"; Hindi "मेरा नाम ... है".
+  conftest.py         lets tests import engine modules.
+
+engine/eval/evaluate.py  (where our numbers come from)
+  Generates 150 fake documents of 8 kinds: bank letters, salary slips,
+  KYC forms, chats (some in Hindi), discharge summaries, invoices, and
+  meeting notes where names appear WITHOUT a cue. Each value is recorded
+  with its exact position as it is inserted, so the answer key is
+  perfect. Adds decoys that must not be flagged (12-digit order IDs that
+  fail Verhoeff, invoice numbers, timestamps).
+  Scoring: a hit = a finding overlapping a real item of the same family.
+  A false alarm = a finding overlapping nothing real.
+  Run: engine/.venv/bin/python engine/eval/evaluate.py --llm 30
+  Results: docs/eval-results.md
+
+engine/eval/make_samples.py  (fake demo files -> docs/demo-samples/)
+  bank_letter.txt          English + Hindi paragraph, all ID types
+  id_card_specimen.png     a SPECIMEN card with a QR code and drawn avatar
+  boarding_pass.png        a fake boarding pass with PDF417, Aztec and QR
+  salary_slip.pdf          a digital PDF (has a text layer)
+  salary_slip_scanned.pdf  the same, tilted + noisy, image only (tests OCR)
+  hr_onboarding.pptx       names/PANs in a table, phone + Aadhaar in
+                           speaker notes, an ID picture, Hindi text
+  All numbers are fake but made to pass their checksums.
+
+Browser tests: during development we also ran automated tests with
+Playwright that load the real extension in Chromium and paste text,
+upload the image/PDF/PPTX, click words, draw boxes and stop the engine.
+(Those scripts were kept outside the repo.)
+
+
+================================================================================
+PART 7: SMALL FILES AT THE TOP OF THE REPO
+================================================================================
+
+run.sh              One command to start everything: creates
+                    engine/.venv and installs packages the first time,
+                    downloads the YuNet face model, warns if Tesseract is
+                    missing, starts Ollama if installed, then starts the
+                    engine on 127.0.0.1:8000.
+engine/requirements.txt  Python packages the engine needs.
+.gitignore          Keeps out of git: the Python environment (.venv),
+                    node_modules, build output (.output, .wxt), downloaded
+                    models, and .env.local secret files.
+README.md           What Kavach is, how to run it, the evaluation, EVERY
+                    model/tool with its license, the AI-assistance note,
+                    and limitations.
+LICENSE             MIT.
+docs/eval-results.md  The evaluation table and "what we learned".
+
+
+================================================================================
+PART 8: WHY WE BUILT IT THIS WAY
+================================================================================
+
+  Separate local engine        AI models (PyTorch) run easily in Python;
+                               converting them for the browser would take
+                               hours. Local = data never leaves.
+  Capture-phase listeners      We run before the site's code, so the site
+                               never sees the raw data.
+  Placeholders, not deletion   The chatbot still understands the text, and
+                               we can restore real values on screen.
+  Same value -> same label     Answers stay consistent across pastes and
+                               files ("Rahul" is [PERSON_1] everywhere).
+  Checksums                    The reason for zero false alarms.
+  Sentence-by-sentence NER     Much better accuracy than whole documents.
+  Never trust LLM positions    LLMs miscount; we find the text ourselves
+                               and drop anything invented.
+  Review card                  Detection is never perfect; a human makes
+                               the final decision.
+  Manual hiding                Users can hide what the AI missed, or
+                               things only they know are private.
+  Rebuild PDFs from images     Stops the classic "text hidden under the
+                               black box" leak.
+  Blur codes, don't decode     The QR/barcode contents are private; we
+                               don't need to read them to hide them.
+  Closed Shadow DOM            The chatbot page can't read our card.
+  Edit text nodes only         Restoring doesn't break React-based sites.
+  Vault in session memory      Wiped when the browser closes; never on disk.
+  In-browser rules fallback    If the engine is down, IDs are still hidden
+                               with no network call. Never fail silently.
+  Open-weight models only      Track 1 requirement, and users can trust and
+                               inspect them.
+
+
+================================================================================
+PART 9: QUESTIONS JUDGES MAY ASK
+================================================================================
+
+Q: Why not just use regex?
+A: Names have no pattern. Rules alone catch 69%; adding the open-source
+   NER model catches 97%, with still zero false alarms.
+
+Q: Why not use ChatGPT/GPT to find the private data?
+A: That would send the data to the cloud, which is the exact problem.
+
+Q: Does ChatGPT ever see the real data?
+A: No. Click "Show what the chatbot saw": it only got [PERSON_1] etc.
+
+Q: How do you avoid hiding harmless numbers?
+A: Checksums. A random 12-digit order number fails Verhoeff. Context
+   rules: a long number is a bank account only next to "A/c".
+
+Q: What if the engine isn't running?
+A: The extension has its own copy of the rules, so IDs and numbers are
+   still hidden with no network. Names can be hidden by clicking. Files
+   need the engine. Nothing is ever pasted silently.
+
+Q: Indian languages?
+A: Hindi/Marathi names (NER model), Indian-script digits (normalize.py),
+   OCR in English, Hindi and Marathi, Hindi name cues and labels.
+
+Q: Why is the PDF turned into images?
+A: So nothing hidden survives under the black boxes.
+
+Q: What's in the QR code on an Aadhaar card?
+A: Name, date of birth, address, photo. So we blur it. Boarding-pass
+   barcodes hold name and PNR. We blur those too.
+
+Q: How do the extension and engine talk?
+A: HTTP on 127.0.0.1:8000 (this laptop only), JSON in the format defined
+   in engine/schemas.py. Only the background worker calls the engine,
+   because browsers block web pages from calling local addresses.
+
+Q: How did you test it?
+A: 14 unit tests, an evaluation on 150 synthetic documents, a check that
+   the TypeScript rules match the Python rules on 157 documents, and
+   automated browser tests with the real extension.
+
+Q: Did you write this yourselves?
+A: Be honest: "We built it with the help of Claude Code (an AI coding
+   assistant); that is disclosed in the README. We designed the
+   approach, tested it, and we understand every part." Then explain one
+   piece (Verhoeff, merge priorities, or capture-phase interception).
+
+Q: What would you do next?
+A: Enable IndicNER, a one-click installer for the engine, running the
+   models directly in the browser (WebGPU), DOCX/Excel support, and
+   testing on Windows.
+
+
+================================================================================
+PART 10: HONEST LIMITATIONS
+================================================================================
+
+  - Tested on our local test page; NOT yet tested on the live ChatGPT,
+    Gemini and Claude sites.
+  - IndicNER is not active yet (needs Hugging Face approval); the
+    multilingual fallback model is being used.
+  - Accuracy numbers come from SYNTHETIC documents. Say "on our synthetic
+    test set".
+  - Handwriting and blurry photos OCR poorly; what OCR misses can't be
+    redacted (the review card and manual boxes help).
+  - Files from cloud connectors (Google Drive, OneDrive) never pass
+    through the browser, so Kavach can't see them.
+  - Without the engine: files can't be scanned and names may be missed.
+  - Restored values are shown on the page; the chatbot's servers never
+    get them, but the page's own scripts could read the rendered text.
+  - Windows and the Firefox build are untested.
+
+
+================================================================================
+PART 11: HOW TO RUN THE DEMO
+================================================================================
+
+  1. Start the engine:      ./run.sh
+     Check:                 curl 127.0.0.1:8000/health  -> {"ok":true,...}
+  2. Build the extension (only if extension/.output is missing):
+                            cd extension && npm install && npm run build
+  3. Load it in Chrome:     chrome://extensions -> Developer mode ->
+                            Load unpacked -> extension/.output/chrome-mv3
+                            (already loaded? click its refresh arrow)
+  4. Safest demo page:      http://127.0.0.1:8000/test
+     - paste the text of docs/demo-samples/bank_letter.txt
+     - click a word to hide it, then "Protect & paste", then Send
+     - show the restored reply and click "Show what the chatbot saw"
+     - attach docs/demo-samples/boarding_pass.png (codes get blurred)
+     - drag a box over something on the preview
+  5. Then try the same on chatgpt.com.
+
+  SUGGESTED SPLIT FOR THE TEAM
+    Person 1: the problem + the demo (Parts 1, 3)
+    Person 2: the three detection layers + checksums (Part 4, detect/)
+    Person 3: files: OCR, PDF, PPTX, codes, faces (Part 4, docs/)
+    Person 4: the extension, placeholders, restoring, manual hiding,
+              and the evaluation numbers (Parts 5, 6)
+  Judges can ask ANY of you, so everyone should read Parts 1, 3 and 9.
+
+================================================================================
