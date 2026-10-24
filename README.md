@@ -4,6 +4,8 @@
 
 > Hacktoberfest Hack Day Pune 2026 · Track 1: Best Open-Source AI Project · Problem statement #3: PII redaction for Indian documents and languages
 
+**📊 Presentation:** [Kavach pitch deck (Google Slides)](https://docs.google.com/presentation/d/1qd0gCSprEQmKqdoxg3htJ0x4cCJAAbxlSdSDp4U-4qM/edit?usp=drive_link) · **📘 Full guide:** [docs/Kavach_Complete_Guide.pdf](docs/Kavach_Complete_Guide.pdf)
+
 ## What it protects
 
 | Input | How |
