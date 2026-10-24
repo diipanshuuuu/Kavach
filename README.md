@@ -68,19 +68,31 @@ One click ("Show what the chatbot saw") flips back to the placeholders.
 
 See [docs/eval-results.md](docs/eval-results.md) for the latest run. Headline: rules alone miss most names and addresses that appear in plain sentences. Adding the open-weight NER model is what lifts recall to ~97%.
 
-## Run it
+## Install (one step)
 
 ```bash
-# 1. system tools (macOS)
-brew install tesseract tesseract-lang ollama
-ollama pull qwen3:4b              # optional, for deep scan
+git clone https://github.com/diipanshuuuu/Kavach.git && cd Kavach
+./install.sh                # add --with-llm for Deep scan (Ollama + Qwen3-4B, ~2.5 GB)
+```
 
-# 2. engine
-./run.sh                          # creates engine/.venv on first run, serves http://127.0.0.1:8000
+The installer (macOS and Linux; Windows via WSL):
 
-# 3. extension
+1. installs Tesseract OCR with Hindi and Marathi (and Node if missing),
+2. creates the engine's Python environment and **downloads the AI models up front**,
+3. builds the extension and puts shareable zips in `dist/`,
+4. registers the engine to **start automatically at every login** and restart if it ever crashes (a LaunchAgent on macOS, a systemd user service on Linux),
+5. waits until the engine answers.
+
+Then load the extension once: `chrome://extensions` → **Developer mode** → **Load unpacked** → `extension/.output/chrome-mv3`. From then on, Kavach just works: there's nothing to start by hand.
+
+`./uninstall.sh` stops the engine and removes the autostart.
+
+### Developer setup
+
+```bash
+./run.sh                          # start the engine by hand instead of autostart
 cd extension && npm install
-npm run dev                       # opens Chrome with Kavach loaded
+npm run dev                       # opens Chrome with Kavach loaded, reloads on change
 npm run build:firefox             # Firefox build in .output/firefox-mv2
 ```
 

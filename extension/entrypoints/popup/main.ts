@@ -33,7 +33,7 @@ async function showStatus(): Promise<void> {
     );
   } catch {
     box.className = 'status bad';
-    text.textContent = 'Engine offline — run ./run.sh';
+    text.textContent = 'Engine offline — run ./install.sh once';
     models.replaceChildren();
   }
 }

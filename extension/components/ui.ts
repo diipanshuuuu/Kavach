@@ -534,7 +534,7 @@ export function offline(kind: 'paste' | 'upload', detail?: string): Promise<'ori
   return new Promise((resolve) => {
     const s = shell(
       detail ? 'Kavach could not scan this' : 'Kavach engine is not running',
-      detail ?? 'Start it on this laptop with ./run.sh, then try again.',
+      detail ?? 'Run ./install.sh once (it then starts by itself at every login), or ./run.sh to start it now.',
       null,
     );
     s.body.append(

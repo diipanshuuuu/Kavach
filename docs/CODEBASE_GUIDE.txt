@@ -666,7 +666,15 @@ upload the image/PDF/PPTX, click words, draw boxes and stop the engine.
 PART 7: SMALL FILES AT THE TOP OF THE REPO
 ================================================================================
 
-run.sh              One command to start everything: creates
+install.sh          The one-step installer: installs Tesseract (and Node),
+                    sets up the engine and downloads the AI models, builds
+                    the extension (zips in dist/), and registers the engine
+                    to start automatically at every login and restart if it
+                    crashes (macOS LaunchAgent / Linux systemd). After it,
+                    the user only loads the extension once.
+                    Options: --with-llm (Ollama + Qwen3), --no-autostart.
+uninstall.sh        Stops the engine and removes the autostart.
+run.sh              Starts the engine by hand (for development): creates
                     engine/.venv and installs packages the first time,
                     downloads the YuNet face model, warns if Tesseract is
                     missing, starts Ollama if installed, then starts the
@@ -796,7 +804,9 @@ PART 10: HONEST LIMITATIONS
 PART 11: HOW TO RUN THE DEMO
 ================================================================================
 
-  1. Start the engine:      ./run.sh
+  1. Engine: on this laptop it already starts by itself at login
+     (installed with ./install.sh). Otherwise run ./install.sh once,
+     or ./run.sh to start it by hand.
      Check:                 curl 127.0.0.1:8000/health  -> {"ok":true,...}
   2. Build the extension (only if extension/.output is missing):
                             cd extension && npm install && npm run build
