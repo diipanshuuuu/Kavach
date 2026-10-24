@@ -24,8 +24,8 @@ const FAMILY: Record<EntityType, [string, string]> = {
   EMAIL: ['#2563eb', 'Email'],
   DOB: ['#4f46e5', 'Date of birth'],
   PINCODE: ['#0891b2', 'PIN code'],
-  QR: ['#111827', 'QR / barcode'],
-  FACE: ['#111827', 'Face photo'],
+  QR: ['#475569', 'QR / barcode'],
+  FACE: ['#475569', 'Face photo'],
   CUSTOM: ['#be123c', 'Hidden by you'],
 };
 

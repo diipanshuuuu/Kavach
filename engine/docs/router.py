@@ -4,6 +4,7 @@ Two steps so the user can review before anything is drawn:
   analyze(file)  -> job_id + pages with items and boxes
   render(job_id, chosen ids, placeholders, manual boxes, extra words)
       -> redacted file, same type as input
+match_term(job_id, word) shows the user where a typed word will be hidden before rendering.
 """
 
 import base64
@@ -16,7 +17,8 @@ from PIL import Image
 
 from detect import detect, rules
 from detect.normalize import normalize
-from schemas import AnalyzeFileResponse, FileItem, FilePage, RenderRequest, RenderResponse
+from schemas import (AnalyzeFileResponse, FileItem, FilePage, MatchTermRequest, MatchTermResponse, RenderRequest,
+                     RenderResponse)
 
 from . import jobs, pptx_redact, render, visual
 from .ocr import ocr_page, open_image
@@ -188,6 +190,36 @@ def analyze(filename: str, mime: str, data: bytes, deep: bool = False,
 
     job_id = jobs.put(jobs.Job(kind=kind, filename=filename, mime=mime, data=state))
     return AnalyzeFileResponse(job_id=job_id, kind=kind, filename=filename, pages=pages_out)
+
+
+# ---------- typed words ----------
+
+def match_term(req: MatchTermRequest) -> MatchTermResponse:
+    """Where a word typed in the review card occurs, so the card can mark it before rendering."""
+    job = jobs.get(req.job_id)
+    if job is None:
+        raise KeyError("This scan expired. Please upload the file again.")
+    state = job.data
+    if job.kind == "pptx":
+        pages = [(i, state["pics"][key]) for i, key in state["pic_keys"].items()]
+    else:
+        pages = list(state["pages"].items())
+
+    count, boxes = 0, {}
+    for index, st in pages:
+        text: PageText = st["text"]
+        scale = st["scale"] or 1.0
+        for e in rules.find_terms(normalize(text.text), [req.term]):
+            found = boxes_for_span(text, e.start, e.end)
+            if found:
+                count += 1
+                boxes.setdefault(str(index), []).extend([round(v * scale, 1) for v in b] for b in found)
+    if job.kind == "pptx":
+        prs = pptx_redact.open_deck(state["data"])
+        for _, _, kind_, obj, _ in pptx_redact.walk(prs):
+            if kind_ == "para":
+                count += len(rules.find_terms(normalize(pptx_redact.para_text(obj)), [req.term]))
+    return MatchTermResponse(count=count, boxes=boxes)
 
 
 # ---------- render ----------

@@ -107,6 +107,16 @@ class RenderRequest(BaseModel):
     terms: list[str] = []  # extra words to hide everywhere in the file
 
 
+class MatchTermRequest(BaseModel):
+    job_id: str
+    term: str
+
+
+class MatchTermResponse(BaseModel):
+    count: int  # occurrences in the file (text and pictures)
+    boxes: dict[str, list[list[float]]] = {}  # page index -> boxes in preview pixels
+
+
 class RenderResponse(BaseModel):
     file_b64: str
     mime: str

@@ -126,6 +126,7 @@ kbd { font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1p
 .box { position: absolute; cursor: pointer; border: 2px solid var(--c); background: color-mix(in srgb, var(--c) 26%, transparent); border-radius: 4px; transition: background .12s; }
 .box:hover { background: color-mix(in srgb, var(--c) 40%, transparent); }
 .box.off { background: transparent; border-style: dashed; opacity: .5; }
+.box.term { pointer-events: none; border: 2px dashed var(--c); background: color-mix(in srgb, var(--c) 30%, transparent); }
 .box.manual { border: 2px dashed #e11d48; background: repeating-linear-gradient(45deg, rgba(225,29,72,.32) 0 6px, rgba(225,29,72,.12) 6px 12px); }
 .rows { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
 .row { display: grid; grid-template-columns: auto auto 1fr auto; gap: 10px; align-items: center; font-size: 13px; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
@@ -172,5 +173,15 @@ kbd { font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1p
   .row .loc { display: none; }
   .footer .btn { flex: 1 1 auto; justify-content: center; }
   .keys { display: none; }
+}
+
+/* On dark cards, lift each type's colour towards white so labels stay readable. */
+@media (prefers-color-scheme: dark) {
+  .chip, .tok {
+    color: color-mix(in srgb, var(--c) 45%, #fff);
+    background: color-mix(in srgb, var(--c) 24%, transparent);
+    border-color: color-mix(in srgb, var(--c) 60%, transparent);
+  }
+  .chip::before { background: color-mix(in srgb, var(--c) 60%, #fff); }
 }
 `;

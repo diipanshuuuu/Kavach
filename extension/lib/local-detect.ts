@@ -209,11 +209,16 @@ function contextNames(text: string): Entity[] {
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const isWordChar = (c: string) => /[\p{L}\p{N}]/u.test(c);
+const TERM_GAP = '[\\s\\-–—·.,/:|]*';
+const LETTER_DIGIT = /(?<=\p{N})(?=\p{L})|(?<=\p{L})(?=\p{N})/u;
 
 export function findTerms(text: string, terms: string[]): Entity[] {
   const out: Entity[] = [];
   for (const term of new Set(terms.map((t) => t.trim()).filter((t) => t.length >= 2))) {
-    const body = term.split(/\s+/).map(escape).join('\\s+');
+    // Same as the engine: words, and letters/digits inside a word, may be joined by spaces, punctuation or nothing.
+    const pieces = term.split(/\s+/).flatMap((w) => w.split(LETTER_DIGIT)).filter((p) => /[\p{L}\p{N}]/u.test(p));
+    if (!pieces.length) continue;
+    const body = pieces.map(escape).join(TERM_GAP);
     const left = isWordChar(term[0]!) ? '(?<![\\p{L}\\p{N}\\p{M}])' : '';
     const right = isWordChar(term.at(-1)!) ? '(?![\\p{L}\\p{N}\\p{M}])' : '';
     for (const m of text.matchAll(new RegExp(left + body + right, 'giu'))) out.push(ent(m.index!, m[0], 'CUSTOM', 'user', 1));

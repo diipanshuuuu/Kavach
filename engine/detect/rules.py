@@ -149,11 +149,21 @@ def _context_names(text: str) -> list[Entity]:
     return out
 
 
+_TERM_GAP = r"[\s\-–—·.,/:|]*"
+_LETTER_DIGIT = re.compile(r"(?<=\d)(?=[^\W\d_])|(?<=[^\W\d_])(?=\d)")
+
+
 def find_terms(text: str, terms: list[str]) -> list[Entity]:
     """Every occurrence of the user's own words (case-insensitive, whole words)."""
     out = []
     for term in {t.strip() for t in terms if len(t.strip()) >= 2}:
-        body = r"\s+".join(re.escape(w) for w in term.split())
+        # OCR often drops or adds spaces and misreads separators ("Seat 12A" -> "Seat12A",
+        # "SF 657 · 24 OCT" -> "SF 657 - 24 OCT"), so words, and letters/digits inside a
+        # word, may be joined by any run of spaces or punctuation, or by nothing.
+        pieces = [p for w in term.split() for p in _LETTER_DIGIT.split(w) if any(c.isalnum() for c in p)]
+        if not pieces:
+            continue
+        body = _TERM_GAP.join(re.escape(p) for p in pieces)
         left = r"(?<![\wऀ-෿])" if (term[0].isalnum() or "ऀ" <= term[0] <= "෿") else ""
         right = r"(?![\wऀ-෿])" if (term[-1].isalnum() or "ऀ" <= term[-1] <= "෿") else ""
         for m in re.finditer(left + body + right, text, re.I):

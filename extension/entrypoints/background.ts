@@ -55,6 +55,8 @@ async function handle(msg: Message): Promise<Replies[Message['type']]> {
     }
     case 'RENDER':
       return engine.renderRedacted(msg.job_id, msg.chosen, msg.placeholders, msg.customBoxes, msg.terms);
+    case 'MATCH_TERM':
+      return engine.matchTerm(msg.job_id, msg.term);
     case 'VAULT_GET':
       return { tokens: await vault.tokens() };
     case 'VAULT_CLEAR':
